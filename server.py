@@ -30,20 +30,21 @@ log = logging.getLogger("mbot")
 HERE = Path(__file__).parent
 MAX_RPM = 200          # mbot2.drive_speed limit
 WATCHDOG_S = 0.5       # stop if no drive command for this long
-TELEMETRY_S = 0.15     # telemetry poll period
-RIGHT_SIGN = -1        # EM2 is mounted mirrored: forward = drive_speed(+v, -v)
+TELEMETRY_S = 0.15     # telemetry poll periodRIGHT_SIGN = -1        # EM2 is mounted mirrored: forward = drive_speed(+v, -v)
 
 # Sensor reads on the mBot2 base hang (no reply) when the base is switched off and
 # only the CyberPi is USB-powered, so check the shield first and only read the
 # base when it's there.
 SHIELD_EXPR = "cyberpi.get_shield()"
-CYBERPI_EXPR = "{'light': cyberpi.get_bri(), 'loud': cyberpi.get_loudness('maximum')}"
+SHIELD_EVERY_S = 2.0
+# List form keeps the script under the CyberPi's ~255-byte limit (see cyberlink.MAX_SCRIPT).
+CYBERPI_KEYS = ("light", "loud")
+CYBERPI_EXPR = "[cyberpi.get_bri(), cyberpi.get_loudness('maximum')]"
+TELEMETRY_KEYS = ("dist", "line", "batt", "roll", "pitch", "em1", "em2", "light", "loud")
 TELEMETRY_EXPR = (
-    "{'dist': cyberpi.ultrasonic2.get(1),"
-    " 'line': cyberpi.quad_rgb_sensor.get_line_sta(1), 'batt': cyberpi.get_battery(),"
-    " 'roll': cyberpi.get_roll(), 'pitch': cyberpi.get_pitch(),"
-    " 'em1': mbot2.EM_get_speed('EM1'), 'em2': mbot2.EM_get_speed('EM2'),"
-    " 'light': cyberpi.get_bri(), 'loud': cyberpi.get_loudness('maximum')}"
+    "[cyberpi.ultrasonic2.get(1), cyberpi.quad_rgb_sensor.get_line_sta(1), cyberpi.get_battery(),"
+    " cyberpi.get_roll(), cyberpi.get_pitch(), mbot2.EM_get_speed('EM1'), mbot2.EM_get_speed('EM2'),"
+    " cyberpi.get_bri(), cyberpi.get_loudness('maximum')]"
 )
 
 
@@ -62,6 +63,7 @@ class Robot(threading.Thread):
         self.base_on = False  # mBot2 base (motors/sensors) powered
         self.actions: queue.Queue[str] = queue.Queue()
         self.stop_evt = threading.Event()
+        self.redetect = threading.Event()  # soft-restart CyberPi to re-detect the base
 
     def drive(self, left: float, right: float) -> None:
         self.target = (int(clamp(left, -MAX_RPM, MAX_RPM)), int(clamp(right, -MAX_RPM, MAX_RPM)))
@@ -93,9 +95,20 @@ class Robot(threading.Thread):
             self.stop_evt.wait(2)
 
     def _loop(self, bot: CyberPi) -> None:
-        next_tel = 0.0
+        next_tel = next_shield = 0.0
+        shield = None
         misses = 0
+        self.base_on = False
         while not self.stop_evt.is_set():
+            if self.redetect.is_set():
+                self.redetect.clear()
+                self.publish({"type": "link", "state": "connecting", "note": "re-detecting base"})
+                bot.send("mbot2.EM_stop('ALL')")
+                bot.restart()
+                self.sent = None
+                self.base_on = False
+                next_shield = 0.0
+                self.publish({"type": "link", "state": "up", "port": bot.port})
             now = time.monotonic()
             left, right = self.target if now - self.last_drive < WATCHDOG_S else (0, 0)
             if (left, right) != self.sent and self.base_on:
@@ -105,16 +118,19 @@ class Robot(threading.Thread):
                 script = self.actions.get_nowait()
                 try:
                     bot.call(script, timeout=3)
-                except TimeoutError:
-                    log.info("action got no reply: %s", script)
+                except (TimeoutError, ValueError) as e:
+                    log.info("action failed (%s): %s", e, script)
             if now >= next_tel:
                 next_tel = now + TELEMETRY_S
                 try:
-                    shield = bot.call(SHIELD_EXPR, timeout=1)
-                    tel = bot.call(TELEMETRY_EXPR if shield == "mbot2" else CYBERPI_EXPR, timeout=1)
+                    if now >= next_shield:
+                        next_shield = now + SHIELD_EVERY_S
+                        shield = bot.call(SHIELD_EXPR, timeout=1)
+                    keys, expr = (TELEMETRY_KEYS, TELEMETRY_EXPR) if shield == "mbot2" else (CYBERPI_KEYS, CYBERPI_EXPR)
+                    vals = bot.call(expr, timeout=1)
                     misses = 0
-                    if isinstance(tel, dict):
-                        self.publish({"type": "telemetry", "shield": shield, **tel, "drive": self.sent})
+                    if isinstance(vals, list) and len(vals) == len(keys):
+                        self.publish({"type": "telemetry", "shield": shield, **dict(zip(keys, vals)), "drive": self.sent})
                     if self.base_on != (shield == "mbot2"):
                         self.base_on = shield == "mbot2"
                         self.sent = None  # resend drive state after the base powers on
@@ -144,6 +160,10 @@ def handle_client_msg(robot: Robot, msg: dict) -> None:
     elif kind == "led":
         r, g, b = (int(clamp(int(msg.get(k, 0)), 0, 255)) for k in "rgb")
         robot.act(f"cyberpi.led.on({r}, {g}, {b})")
+    elif kind == "redetect":
+        robot.drive(0, 0)
+        robot.last_drive = 0
+        robot.redetect.set()
     elif kind == "led_off":
         robot.act("cyberpi.led.off()")
     elif kind == "beep":

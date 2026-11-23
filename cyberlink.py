@@ -54,8 +54,14 @@ def build_frame(ftype: int, mode: int, idx: int, payload: bytes) -> bytes:
     return bytes([0xF3, (0xF3 + lo + hi) & 0xFF, lo, hi]) + body + bytes([sum(body) & 0xFF, 0xF4])
 
 
+# Scripts longer than ~255 bytes get no reply (observed: 242 ok, 270 silently dropped).
+MAX_SCRIPT = 250
+
+
 def script_frame(script: str, idx: int, want_response: bool = True) -> bytes:
     data = script.encode("utf8")
+    if len(data) > MAX_SCRIPT:
+        raise ValueError(f"script is {len(data)} bytes; the CyberPi drops anything over ~255: {script[:60]}...")
     payload = bytes([len(data) & 0xFF, (len(data) >> 8) & 0xFF]) + data
     return build_frame(TYPE_SCRIPT, MODE_WITH_RESPONSE if want_response else MODE_NO_RESPONSE, idx, payload)
 
@@ -107,6 +113,16 @@ class CyberPi:
             except TimeoutError:
                 continue
         raise TimeoutError(f"CyberPi on {self.port} did not respond")
+
+    def restart(self, timeout: float = 15.0) -> None:
+        """Soft-restart the CyberPi (cyberpi.restart()) without touching USB, then re-handshake.
+
+        The CyberPi only detects the mBot2 base at boot; this re-runs detection
+        without the DTR/RTS reset that reopening the port causes.
+        """
+        self.send("cyberpi.restart()")
+        time.sleep(4)
+        self.connect(timeout)
 
     def close(self) -> None:
         self._stop.set()

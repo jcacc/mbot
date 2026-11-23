@@ -64,7 +64,9 @@
   .say { display: flex; gap: 8px; margin-top: 10px; }
   .say input { flex: 1; min-width: 0; background: #0f1216; color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; }
   #banner { display: none; margin: 14px 14px 0; padding: 10px 14px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); font-size: 14px; }
-  #banner.show { display: block; }
+  #banner.show { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  #banner button { border: 1px solid var(--warn); background: transparent; color: var(--warn); border-radius: 9px; padding: 7px 12px; font: inherit; cursor: pointer; white-space: nowrap; }
+  #banner button:disabled { opacity: .5; cursor: default; }
 </style>
 </head>
 <body>
@@ -75,7 +77,7 @@
   <span class="spacer"></span>
   <span class="batt" id="batt">— %</span>
 </header>
-<div id="banner"></div>
+<div id="banner"><span id="bannertext"></span> <button id="redetect">Re-detect base</button></div>
 <main>
   <section class="panel drive">
     <div id="pad"><div id="knob"></div></div>
@@ -157,7 +159,7 @@
     setBadge("base", baseOn ? "base on" : t.shield === "unknown" ? "no reply" : "base off", baseOn ? "ok" : "bad");
     const banner = $("banner");
     banner.classList.toggle("show", !baseOn);
-    banner.textContent = baseOn ? "" : "The mBot2 base is switched off. Only the CyberPi is powered over USB, so the motors and sensors won't respond. Flip the power switch on the side of the robot.";
+    $("bannertext").textContent = baseOn ? "" : "No mBot2 base detected. The CyberPi only checks for the base when it starts up: turn the base on (if it still isn't found, switch it off and on again), then press Re-detect.";
     if (!baseOn) return;
     $("batt").textContent = fmt(t.batt) + " %";
     $("dist").textContent = t.dist >= 300 ? "300+" : fmt(t.dist, 1);
@@ -234,6 +236,11 @@
     send({ type: "led", r, g, b: bl });
   };
   document.querySelectorAll("[data-beep]").forEach(b => (b.onclick = () => send({ type: "beep", freq: +b.dataset.beep })));
+  $("redetect").onclick = () => {
+    const b = $("redetect"); b.disabled = true; b.textContent = "Restarting…";
+    send({ type: "redetect" });
+    setTimeout(() => { b.disabled = false; b.textContent = "Re-detect base"; }, 8000);
+  };
   $("say").onsubmit = e => { e.preventDefault(); send({ type: "say", text: $("saytext").value }); };
 
   connect();
