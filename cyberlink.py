@@ -114,16 +114,6 @@ class CyberPi:
                 continue
         raise TimeoutError(f"CyberPi on {self.port} did not respond")
 
-    def restart(self, timeout: float = 15.0) -> None:
-        """Soft-restart the CyberPi (cyberpi.restart()) without touching USB, then re-handshake.
-
-        The CyberPi only detects the mBot2 base at boot; this re-runs detection
-        without the DTR/RTS reset that reopening the port causes.
-        """
-        self.send("cyberpi.restart()")
-        time.sleep(4)
-        self.connect(timeout)
-
     def close(self) -> None:
         self._stop.set()
         self._reader.join(timeout=1)

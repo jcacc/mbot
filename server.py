@@ -30,7 +30,8 @@ log = logging.getLogger("mbot")
 HERE = Path(__file__).parent
 MAX_RPM = 200          # mbot2.drive_speed limit
 WATCHDOG_S = 0.5       # stop if no drive command for this long
-TELEMETRY_S = 0.15     # telemetry poll periodRIGHT_SIGN = -1        # EM2 is mounted mirrored: forward = drive_speed(+v, -v)
+TELEMETRY_S = 0.15     # telemetry poll period
+RIGHT_SIGN = -1       # EM2 is mounted mirrored: forward = drive_speed(+v, -v)
 
 # Sensor reads on the mBot2 base hang (no reply) when the base is switched off and
 # only the CyberPi is USB-powered, so check the shield first and only read the
@@ -48,6 +49,10 @@ TELEMETRY_EXPR = (
 )
 
 
+class RedetectRequested(Exception):
+    pass
+
+
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
@@ -63,7 +68,7 @@ class Robot(threading.Thread):
         self.base_on = False  # mBot2 base (motors/sensors) powered
         self.actions: queue.Queue[str] = queue.Queue()
         self.stop_evt = threading.Event()
-        self.redetect = threading.Event()  # soft-restart CyberPi to re-detect the base
+        self.redetect = threading.Event()  # reopen the port so the CyberPi reboots and re-detects the base
 
     def drive(self, left: float, right: float) -> None:
         self.target = (int(clamp(left, -MAX_RPM, MAX_RPM)), int(clamp(right, -MAX_RPM, MAX_RPM)))
@@ -86,13 +91,19 @@ class Robot(threading.Thread):
                 self.publish({"type": "link", "state": "down", "error": str(e)})
             finally:
                 if bot:
-                    try:
-                        bot.send("mbot2.EM_stop('ALL')")
-                    except Exception:
-                        pass
+                    # drive_speed(0, 0), not EM_stop('ALL'): EM_stop is the main
+                    # suspect for the base dropping out of detection.
+                    if self.base_on:
+                        try:
+                            bot.call("mbot2.drive_speed(0, 0)", timeout=0.5)
+                        except Exception:
+                            pass
                     bot.close()
                 self.sent = None
-            self.stop_evt.wait(2)
+                self.base_on = False
+            # Port closed for a few seconds before reopening: the sequence that
+            # preceded the base being re-detected every time it recovered.
+            self.stop_evt.wait(3)
 
     def _loop(self, bot: CyberPi) -> None:
         next_tel = next_shield = 0.0
@@ -102,13 +113,7 @@ class Robot(threading.Thread):
         while not self.stop_evt.is_set():
             if self.redetect.is_set():
                 self.redetect.clear()
-                self.publish({"type": "link", "state": "connecting", "note": "re-detecting base"})
-                bot.send("mbot2.EM_stop('ALL')")
-                bot.restart()
-                self.sent = None
-                self.base_on = False
-                next_shield = 0.0
-                self.publish({"type": "link", "state": "up", "port": bot.port})
+                raise RedetectRequested("re-detecting base: closing port, reopening in 3s")
             now = time.monotonic()
             left, right = self.target if now - self.last_drive < WATCHDOG_S else (0, 0)
             if (left, right) != self.sent and self.base_on:
@@ -164,6 +169,7 @@ def handle_client_msg(robot: Robot, msg: dict) -> None:
         robot.drive(0, 0)
         robot.last_drive = 0
         robot.redetect.set()
+        log.info("re-detect requested")
     elif kind == "led_off":
         robot.act("cyberpi.led.off()")
     elif kind == "beep":

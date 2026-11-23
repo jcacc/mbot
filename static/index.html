@@ -239,7 +239,7 @@
   $("redetect").onclick = () => {
     const b = $("redetect"); b.disabled = true; b.textContent = "Restarting…";
     send({ type: "redetect" });
-    setTimeout(() => { b.disabled = false; b.textContent = "Re-detect base"; }, 8000);
+    setTimeout(() => { b.disabled = false; b.textContent = "Re-detect base"; }, 12000);
   };
   $("say").onsubmit = e => { e.preventDefault(); send({ type: "say", text: $("saytext").value }); };
 
