@@ -146,6 +146,8 @@
       if (m.type === "link") {
         const map = { up: ["robot linked", "ok"], connecting: ["connecting to robot…", "warn"], down: ["robot link down", "bad"] };
         setBadge("link", ...map[m.state]);
+        if (m.state === "up" && m.via) $("link").textContent = "robot linked · " + (m.via.startsWith("Wi-Fi") ? "Wi-Fi" : "USB");
+        $("link").title = m.error || m.via || "";
       } else if (m.type === "telemetry") telemetry(m);
     };
   }

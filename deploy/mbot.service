@@ -1,0 +1,21 @@
+[Unit]
+Description=mBot2 web control (Wi-Fi mode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jca
+WorkingDirectory=/home/jca/mbot
+# MBOT_TOKEN=... (shared secret the robot sends on connect)
+EnvironmentFile=/home/jca/mbot/.env
+ExecStart=/home/jca/mbot/.venv/bin/python server.py --host 0.0.0.0 --port 8097 --robot-port 8096
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

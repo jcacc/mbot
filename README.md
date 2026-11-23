@@ -1,6 +1,6 @@
 # mbot
 
-Web control for a [Makeblock](https://github.com/Makeblock-official) mBot2 (CyberPi controller), tethered over USB.
+Web control for a [Makeblock](https://github.com/Makeblock-official) mBot2 (CyberPi controller), over USB or Wi-Fi.
 Drive it from a browser or phone with a touch joystick or WASD, and watch its sensors live.
 
 Not affiliated with Makeblock. The serial protocol was worked out from Makeblock's
@@ -8,10 +8,11 @@ Not affiliated with Makeblock. The serial protocol was worked out from Makeblock
 Python packages and by probing the robot; no Makeblock code is included.
 
 ```
-browser ⇄ WebSocket ⇄ server.py (aiohttp) ⇄ USB serial ⇄ CyberPi ⇄ mBot2 base
+USB:    browser ⇄ WebSocket ⇄ server.py ⇄ USB serial ⇄ CyberPi ⇄ mBot2 base
+Wi-Fi:  browser ⇄ WebSocket ⇄ server.py ⇄ TCP :8096 ⇄ robot/mbot_wifi.py on the CyberPi
 ```
 
-## Run
+## Run (USB)
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install pyserial aiohttp
@@ -30,12 +31,28 @@ port and reopens it 3 s later, which reboots the CyberPi).
 No driver needed on macOS: the CH340 USB-serial chip uses the built-in driver
 (`/dev/cu.usbserial-*`).
 
+## Run (Wi-Fi)
+
+The robot connects **out** to the server, so the server needs a fixed address on your LAN.
+
+1. **Server:** `MBOT_TOKEN=<random secret> .venv/bin/python server.py --host 0.0.0.0 --port 8097 --robot-port 8096`
+   (only `aiohttp` is needed; `deploy/mbot.service` runs it under systemd with the token in `.env`).
+2. **Robot:** open `robot/mbot_wifi.py`, fill in `WIFI_SSID`, `WIFI_PASS` (2.4 GHz network; the ESP32
+   can't see 5 GHz), `SERVER`, and `TOKEN`. In mBlock 5, connect the CyberPi, switch the editor to
+   **Python**, choose **Upload** mode, paste the file, and upload. It runs at power-on.
+3. Switch the robot on. Its screen shows Wi-Fi → Connected, the LEDs go green, and the page shows
+   *robot linked · Wi-Fi*.
+
+The robot stops its own motors if drive commands stop for 0.6 s, so losing Wi-Fi can't leave it driving.
+
 ## Files
 
 - `cyberlink.py` — minimal client for the CyberPi "online mode" serial protocol: framed
   MicroPython expressions evaluated on the device, `{"ret": ...}` replies. Replaces
   Makeblock's `makeblock`/`cyberpi` PyPI packages.
-- `server.py` — robot thread (drive, actions, telemetry) + aiohttp WebSocket server.
+- `server.py` — aiohttp WebSocket server; USB backend (serial thread) or Wi-Fi backend (`--robot-port`).
+- `robot/mbot_wifi.py` — program for the CyberPi in Wi-Fi mode (upload with mBlock).
+- `deploy/mbot.service` — systemd unit for running the Wi-Fi server on a Pi.
 - `static/index.html` — control page: touch joystick / WASD, speed, STOP, sensors, LEDs, beeps, screen text.
 - `probe.py` — evaluate expressions on the robot: `.venv/bin/python probe.py "cyberpi.get_battery()"`.
 

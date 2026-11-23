@@ -138,6 +138,9 @@ class CyberPi:
         try:
             return fut.result(timeout)
         except TimeoutError:
+            # An exception on the device seems to drop it out of online mode,
+            # after which nothing answers; re-send the online packet to recover.
+            self._write(ONLINE_PACKET)
             raise TimeoutError(f"no reply to {script!r}") from None
         finally:
             with self._plock:
