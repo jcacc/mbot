@@ -52,8 +52,16 @@ drive (forward/backward/left/right, for N seconds, or per-wheel RPM), stop, LEDs
 and reporters for distance, line sensor, battery, roll/pitch, light, loudness, and wheel speed. It
 speaks the same WebSocket messages as the control page, so it works over USB or Wi-Fi.
 
-- In TurboWarp: **Extensions → Custom Extension → URL**, enter the extension's URL, and **tick
-  "Run extension without sandbox"** (it needs `Scratch.vm` to stop the robot on the stop sign).
+- It must run **unsandboxed** (it needs `Scratch.vm` to stop the robot on the stop sign). Stock
+  TurboWarp only runs *URL*-loaded extensions unsandboxed from its trusted list (the sandbox checkbox
+  is greyed out on the URL tab), and a sandboxed load fails with `encountered runtime error: Script error.`.
+  Two ways round it:
+  - **Self-hosted editor patched to trust its own `ext/` folder** (what lookingGlass runs; the patch is
+    `scratch/turbowarp-trust-local-ext.patch` in the personal monorepo). Put `mbot2.js` at
+    `<editor dir>/ext/mbot2.js` and load **Extensions → Custom Extension → URL** with that URL, using
+    the same hostname as the page. No checkbox is needed, and saved projects reload it automatically.
+  - **Stock TurboWarp:** use the **Files** (or Text) tab instead of URL, tick "Run extension without
+    sandbox", and pick `mbot2.js`.
 - By default it connects to `ws://<page host>/mbot/ws`, so serve the editor and the extension from
   the same plain-http host and reverse-proxy `/mbot/` to the server (with WebSocket upgrade headers).
   The `connect to [URL]` block overrides this, e.g. `ws://127.0.0.1:8088/ws` for USB mode.

@@ -2,8 +2,11 @@
 //
 // Talks to this repo's server.py over its browser WebSocket (/ws), the same
 // JSON messages static/index.html sends, so it works with either transport
-// (USB serial or Wi-Fi). Load it as an UNSANDBOXED custom extension:
+// (USB serial or Wi-Fi). It must run UNSANDBOXED. On lookingGlass the editor is
+// patched to trust its own ext/ folder, so this just works:
 //   Extensions -> Custom Extension -> URL -> http://lookingglass.local/scratch/ext/mbot2.js
+// On stock TurboWarp, URL loads are always sandboxed: use the Files tab with
+// "Run extension without sandbox" ticked instead (see README).
 //
 // The editor page must be plain http (or localhost): an https page can't open a
 // ws:// socket to the LAN (mixed content). By default it connects to
@@ -16,7 +19,9 @@
 (function (Scratch) {
   "use strict";
   if (!Scratch.extensions.unsandboxed) {
-    throw new Error("mBot2 extension must run unsandboxed (tick 'Run extension without sandbox').");
+    // Shows up in TurboWarp as "encountered runtime error: Script error." (the
+    // sandbox hides the message).
+    throw new Error("mBot2 extension must run unsandboxed: load it from the editor's own ext/ URL, or via the Files tab with 'Run extension without sandbox' ticked.");
   }
 
   const MAX_RPM = 200;
