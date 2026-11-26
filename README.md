@@ -45,6 +45,23 @@ The robot connects **out** to the server, so the server needs a fixed address on
 
 The robot stops its own motors if drive commands stop for 0.6 s, so losing Wi-Fi can't leave it driving.
 
+## Scratch blocks (TurboWarp)
+
+`scratch/mbot2.js` is a [TurboWarp](https://turbowarp.org) custom extension that adds mBot2 blocks:
+drive (forward/backward/left/right, for N seconds, or per-wheel RPM), stop, LEDs, beep, screen text,
+and reporters for distance, line sensor, battery, roll/pitch, light, loudness, and wheel speed. It
+speaks the same WebSocket messages as the control page, so it works over USB or Wi-Fi.
+
+- In TurboWarp: **Extensions → Custom Extension → URL**, enter the extension's URL, and **tick
+  "Run extension without sandbox"** (it needs `Scratch.vm` to stop the robot on the stop sign).
+- By default it connects to `ws://<page host>/mbot/ws`, so serve the editor and the extension from
+  the same plain-http host and reverse-proxy `/mbot/` to the server (with WebSocket upgrade headers).
+  The `connect to [URL]` block overrides this, e.g. `ws://127.0.0.1:8088/ws` for USB mode.
+- **The editor page has to be http or localhost.** Browsers block `ws://` from an https page (mixed
+  content), so turbowarp.org itself can't reach a LAN robot.
+- Safety: it resends the drive target every 100 ms (the server stops after 0.5 s without one). The
+  stop sign, closing the tab, and a dropped socket all stop the robot.
+
 ## Files
 
 - `cyberlink.py` — minimal client for the CyberPi "online mode" serial protocol: framed
@@ -54,6 +71,7 @@ The robot stops its own motors if drive commands stop for 0.6 s, so losing Wi-Fi
 - `robot/mbot_wifi.py` — program for the CyberPi in Wi-Fi mode (upload with mBlock).
 - `deploy/mbot.service` — systemd unit for running the Wi-Fi server on a Pi.
 - `static/index.html` — control page: touch joystick / WASD, speed, STOP, sensors, LEDs, beeps, screen text.
+- `scratch/mbot2.js` — TurboWarp extension (mBot2 blocks over the server's WebSocket).
 - `probe.py` — evaluate expressions on the robot: `.venv/bin/python probe.py "cyberpi.get_battery()"`.
 
 ## Gotchas
