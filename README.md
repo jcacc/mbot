@@ -1,7 +1,7 @@
 # mbot
 
 Web control for a [Makeblock](https://github.com/Makeblock-official) mBot2 (CyberPi controller), over USB or Wi-Fi.
-Drive it from a browser or phone with a touch joystick or WASD, and watch its sensors live.
+Drive it from a browser or phone with a touch joystick, WASD or a game controller, and watch its sensors live.
 
 Not affiliated with Makeblock. The serial protocol was worked out from Makeblock's
 [`makeblock`](https://pypi.org/project/makeblock/) / [`cyberpi`](https://pypi.org/project/cyberpi/)
@@ -45,6 +45,29 @@ The robot connects **out** to the server, so the server needs a fixed address on
 
 The robot stops its own motors if drive commands stop for 0.6 s, so losing Wi-Fi can't leave it driving.
 
+## Game controller
+
+Any controller the browser can see works (Bluetooth or USB: Xbox, PS4/PS5, Switch Pro, 8BitDo…).
+Pair it to the device that has the control page open, then press a button on it: browsers only
+report a controller after a button press on that page. A green **controller** badge shows when it's picked up.
+
+| Input | Does |
+|---|---|
+| Left stick / D-pad | drive (forward/back + turn) |
+| RT / LT | throttle forward / reverse; the left stick steers |
+| A (Cross) | beep |
+| B (Circle) | stop |
+| X (Square) | next LED colour |
+| Y (Triangle) | LEDs off |
+| LB / RB | speed −/+ 10 |
+
+Releasing the stick or losing the controller sends a stop straight away. Driving forward within
+15 cm of something gives a short rumble (Chrome/Edge). Button mapping needs a controller the
+browser reports as `standard`; anything else only gets the left stick.
+
+Use Chrome or Edge on the plain-http LAN URL; they still expose controllers there
+(Chrome 158 checked), but Firefox may hide them outside https/localhost.
+
 ## Scratch blocks (TurboWarp)
 
 `scratch/mbot2.js` is a [TurboWarp](https://turbowarp.org) custom extension that adds mBot2 blocks:
@@ -78,7 +101,7 @@ speaks the same WebSocket messages as the control page, so it works over USB or 
 - `server.py` — aiohttp WebSocket server; USB backend (serial thread) or Wi-Fi backend (`--robot-port`).
 - `robot/mbot_wifi.py` — program for the CyberPi in Wi-Fi mode (upload with mBlock).
 - `deploy/mbot.service` — systemd unit for running the Wi-Fi server on a Pi.
-- `static/index.html` — control page: touch joystick / WASD, speed, STOP, sensors, LEDs, beeps, screen text.
+- `static/index.html` — control page: touch joystick / WASD / game controller, speed, STOP, sensors, LEDs, beeps, screen text.
 - `scratch/mbot2.js` — TurboWarp extension (mBot2 blocks over the server's WebSocket).
 - `probe.py` — evaluate expressions on the robot: `.venv/bin/python probe.py "cyberpi.get_battery()"`.
 

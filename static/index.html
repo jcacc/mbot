@@ -74,6 +74,7 @@
   <h1>mBot2</h1>
   <span id="link" class="badge">connecting…</span>
   <span id="base" class="badge">base ?</span>
+  <span id="gp" class="badge" hidden>controller</span>
   <span class="spacer"></span>
   <span class="batt" id="batt">— %</span>
 </header>
@@ -88,6 +89,8 @@
     </div>
     <button id="stop">STOP</button>
     <div class="hint">Drag the pad, or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows · <kbd>Space</kbd> stops</div>
+    <div class="hint" id="gphint">Controller: pair it to this device, then press any button on it.<br>
+      Left stick / D-pad drive · <kbd>RT</kbd>/<kbd>LT</kbd> throttle · <kbd>A</kbd> beep · <kbd>B</kbd> stop · <kbd>X</kbd> LED colour · <kbd>Y</kbd> LEDs off · <kbd>LB</kbd>/<kbd>RB</kbd> speed</div>
   </section>
 
   <section class="side">
@@ -134,7 +137,7 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  let ws, joy = { x: 0, y: 0 }, keys = new Set(), padActive = false;
+  let ws, joy = { x: 0, y: 0 }, gpVec = { x: 0, y: 0 }, keys = new Set(), padActive = false;
 
   // ---- websocket ----------------------------------------------------------
   function connect() {
@@ -169,6 +172,7 @@
     const bar = $("distbar");
     bar.style.width = pct + "%";
     bar.style.background = t.dist < 15 ? "var(--bad)" : t.dist < 40 ? "var(--warn)" : "var(--ok)";
+    rumbleIfClose(t.dist);
     [...$("line").children].forEach((el, i) => el.classList.toggle("on", !!(t.line & (8 >> i))));
     $("em1").textContent = fmt(t.em1) + " rpm"; $("em2").textContent = fmt(Math.abs(t.em2)) + " rpm";
     $("roll").textContent = fmt(t.roll) + "°"; $("pitch").textContent = fmt(t.pitch) + "°";
@@ -194,11 +198,11 @@
   }
   // send ~10x/s while anything is held; server watchdog stops the robot when we go quiet
   setInterval(() => {
-    const v = padActive ? joy : keyVector();
+    const v = padActive ? joy : gpMoving() ? gpVec : keyVector();
     if (padActive || v.x || v.y) { const [l, r] = mix(v.x, v.y); send({ type: "drive", l, r }); }
   }, 100);
 
-  const stop = () => { padActive = false; keys.clear(); resetKnob(); send({ type: "stop" }); };
+  const stop = () => { padActive = false; keys.clear(); gpVec = { x: 0, y: 0 }; resetKnob(); send({ type: "stop" }); };
   $("stop").onclick = stop;
 
   addEventListener("keydown", e => {
@@ -210,7 +214,7 @@
   addEventListener("keyup", e => {
     keys.delete(e.key.toLowerCase());
     const v = keyVector();
-    if (!padActive && !v.x && !v.y) send({ type: "stop" });
+    if (!padActive && !gpMoving() && !v.x && !v.y) send({ type: "stop" });
   });
   addEventListener("blur", stop);
   document.addEventListener("visibilitychange", () => document.hidden && stop());
@@ -229,6 +233,84 @@
   const padUp = () => { if (!padActive) return; padActive = false; resetKnob(); send({ type: "stop" }); };
   pad.addEventListener("pointerup", padUp);
   pad.addEventListener("pointercancel", padUp);
+
+  // ---- gamepad ------------------------------------------------------------
+  // Any controller paired to this device (Bluetooth or USB). Button numbers follow the W3C
+  // "standard" layout (Xbox names; PlayStation: A=Cross, B=Circle, X=Square, Y=Triangle).
+  // Read every animation frame so short taps aren't missed; sent by the 10 Hz drive loop above.
+  const DEAD = 0.18;
+  const LEDS = [...document.querySelectorAll("#leds [data-c]")].map(b => b.dataset.c.split(",").map(Number));
+  let gpIndex = null, gpPrev = [], gpWasMoving = false, ledStep = -1, lastRumble = 0;
+  function gpMoving() { return !!(gpVec.x || gpVec.y); }
+  function deadzone(x, y) {
+    const m = Math.hypot(x, y);
+    if (m < DEAD) return [0, 0];
+    const k = Math.min(1, (m - DEAD) / (1 - DEAD)) / m;
+    return [x * k, y * k];
+  }
+  const currentPad = () => (gpIndex === null ? null : (navigator.getGamepads?.() || [])[gpIndex]);
+  function readGamepad() {
+    const gp = currentPad();
+    if (!gp || !gp.connected) { gpVec = { x: 0, y: 0 }; return; }
+    const btn = i => gp.buttons[i] || { pressed: false, value: 0 };
+    let [x, y] = deadzone(gp.axes[0] || 0, -(gp.axes[1] || 0));
+    if (gp.mapping === "standard") {
+      const dx = btn(15).pressed - btn(14).pressed, dy = btn(12).pressed - btn(13).pressed;
+      if (dx || dy) { x = dx; y = dy; }
+      const throttle = btn(7).value - btn(6).value;   // RT forward, LT reverse, left stick steers
+      if (Math.abs(throttle) > 0.05) y = throttle;
+      const edge = i => btn(i).pressed && !gpPrev[i];
+      if (edge(0)) send({ type: "beep", freq: 523 });
+      if (edge(1)) stop();
+      if (edge(2)) { ledStep = (ledStep + 1) % LEDS.length; const [r, g, b] = LEDS[ledStep]; send({ type: "led", r, g, b }); }
+      if (edge(3)) send({ type: "led_off" });
+      if (edge(4) || edge(5)) { speed.value = +speed.value + (edge(5) ? 10 : -10); speed.oninput(); }
+      gpPrev = gp.buttons.map(b => b.pressed);
+    }
+    gpVec = { x, y };
+  }
+  function gpLoop() {
+    if (!document.hidden) readGamepad();
+    const moving = gpMoving();
+    if (!padActive) {
+      if (moving) {
+        const R = pad.getBoundingClientRect().width / 2;
+        knob.style.transform = `translate(${gpVec.x * R * 0.7}px, ${-gpVec.y * R * 0.7}px)`;
+      } else if (gpWasMoving) {
+        resetKnob();
+        const v = keyVector();
+        if (!v.x && !v.y) send({ type: "stop" });   // stick released: stop now, don't wait for the watchdog
+      }
+    }
+    gpWasMoving = moving;
+    requestAnimationFrame(gpLoop);
+  }
+  // short buzz when driving forward toward something close (Chrome/Edge; ignored elsewhere)
+  function rumbleIfClose(dist) {
+    if (!(gpVec.y > 0) || !(dist < 15) || performance.now() - lastRumble < 700) return;
+    lastRumble = performance.now();
+    currentPad()?.vibrationActuator?.playEffect?.("dual-rumble", { duration: 180, strongMagnitude: 0.8, weakMagnitude: 0.4 }).catch(() => {});
+  }
+  function gpAttach(gp) {
+    gpIndex = gp.index; gpPrev = gp.buttons.map(b => b.pressed);
+    setBadge("gp", "controller", "ok"); $("gp").hidden = false; $("gp").title = gp.id;
+  }
+  if (navigator.getGamepads) {
+    addEventListener("gamepadconnected", e => gpIndex === null && gpAttach(e.gamepad));
+    addEventListener("gamepaddisconnected", e => {
+      if (e.gamepad.index !== gpIndex) return;
+      const was = gpMoving();
+      gpIndex = null; gpVec = { x: 0, y: 0 }; $("gp").hidden = true;
+      const other = [...navigator.getGamepads()].find(g => g && g.connected);
+      if (other) gpAttach(other);
+      if (was) stop();
+    });
+    const already = [...navigator.getGamepads()].find(g => g && g.connected);
+    if (already) gpAttach(already);
+    requestAnimationFrame(gpLoop);
+  } else {
+    $("gphint").textContent = "This browser hides game controllers on plain-http pages; use Chrome or Edge for a controller.";
+  }
 
   // ---- fun ----------------------------------------------------------------
   $("leds").onclick = e => {
